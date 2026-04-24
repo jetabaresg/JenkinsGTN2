@@ -45,8 +45,6 @@ Resources:
       SubnetId: !Ref Subnet
       RouteTableId: !Ref RouteTable
 
-  # ─── Security Groups ────────────────────────────────────────────────────────
-
   GrupoSeguridadOpenClaw:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -62,7 +60,6 @@ Resources:
           ToPort: 18987
           CidrIp: 0.0.0.0/0
 
-  # FIX #1: Security Group para Apache que faltaba por completo
   GrupoSeguridadApache:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -82,8 +79,6 @@ Resources:
           ToPort: 8080
           CidrIp: 0.0.0.0/0
 
-  # ─── Instancias ──────────────────────────────────────────────────────────────
-
   instanciaOpenClaw:
     Type: AWS::EC2::Instance
     Properties:
@@ -97,48 +92,29 @@ Resources:
         - Key: Name
           Value: instanciaOpenClaw
       UserData:
-        Fn::Base64: !Sub |
+        Fn::Base64: |
           #!/bin/bash
-          set -e
-
-          # Actualizar el sistema
           apt-get update -y
           apt-get upgrade -y
-
-          # FIX #2: -y en todos los apt install para evitar prompts interactivos
-          # Instalar dependencias para Docker
           apt-get install -y ca-certificates curl
-
-          # Agregar clave GPG oficial de Docker
           install -m 0755 -d /etc/apt/keyrings
           curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
           chmod a+r /etc/apt/keyrings/docker.asc
-
-          # Agregar repositorio de Docker
-          # Leer codename y arquitectura en variables simples para evitar
-          # conflicto con Fn::Sub de CloudFormation (que interpreta ${ } y $( ))
           . /etc/os-release
-          CODENAME="${!UBUNTU_CODENAME:-${!VERSION_CODENAME}}"
+          CODENAME="${UBUNTU_CODENAME:-$VERSION_CODENAME}"
           ARCH="$(dpkg --print-architecture)"
-
           tee /etc/apt/sources.list.d/docker.sources <<DOCKERREPO
           Types: deb
           URIs: https://download.docker.com/linux/ubuntu
-          Suites: ${!CODENAME}
+          Suites: $CODENAME
           Components: stable
-          Architectures: ${!ARCH}
+          Architectures: $ARCH
           Signed-By: /etc/apt/keyrings/docker.asc
           DOCKERREPO
-
           apt-get update -y
-
-          # FIX #2: -y agregado
           apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
           systemctl start docker
           systemctl enable docker
-
-          # FIX #3: heredoc en lugar de echo para evitar problemas de indentación en el YAML
           cat <<'COMPOSE' > /root/docker-compose.yml
           version: '3.8'
           services:
@@ -149,9 +125,6 @@ Resources:
                 - '18987:18987'
               restart: unless-stopped
           COMPOSE
-
-          # FIX #4: "unless.stopped" → "unless-stopped" (corregido arriba en el heredoc)
-
           cd /root
           docker compose up -d
 
@@ -163,36 +136,22 @@ Resources:
       KeyName: prueba
       SubnetId: !Ref Subnet
       SecurityGroupIds:
-        - !Ref GrupoSeguridadApache   # FIX #1: ahora el SG existe
+        - !Ref GrupoSeguridadApache
       Tags:
         - Key: Name
           Value: instanciaApache
       UserData:
-        Fn::Base64: !Sub |
+        Fn::Base64: |
           #!/bin/bash
-          set -e
-
           apt-get update -y
           apt-get upgrade -y
-
-          # FIX #2: -y en todos los apt install
           apt-get install -y apt-transport-https ca-certificates curl software-properties-common git
-
-          # Instalar Docker
           curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
           add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu jammy stable"
           apt-get update -y
           apt-get install -y docker-ce docker-ce-cli containerd.io
-
           systemctl start docker
           systemctl enable docker
-
-          # FIX #5: UserData de Apache completado — clonar repo y levantar compose
           git clone https://github.com/cesarpalacios/JenkinsGTN.git /opt/JenkinsGTN
           cd /opt/JenkinsGTN
-
-          # Levantar el stack si hay un docker-compose.yml en el repo
           docker compose up -d
-
-            docker compose up -d 
-            sudo apt-get install openjdk-17-jre -y
