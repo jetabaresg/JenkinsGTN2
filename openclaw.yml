@@ -115,14 +115,20 @@ Resources:
           chmod a+r /etc/apt/keyrings/docker.asc
 
           # Agregar repositorio de Docker
-          tee /etc/apt/sources.list.d/docker.sources <<EOF
+          # Leer codename y arquitectura en variables simples para evitar
+          # conflicto con Fn::Sub de CloudFormation (que interpreta ${ } y $( ))
+          . /etc/os-release
+          CODENAME="${!UBUNTU_CODENAME:-${!VERSION_CODENAME}}"
+          ARCH="$(dpkg --print-architecture)"
+
+          tee /etc/apt/sources.list.d/docker.sources <<DOCKERREPO
           Types: deb
           URIs: https://download.docker.com/linux/ubuntu
-          Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+          Suites: ${!CODENAME}
           Components: stable
-          Architectures: $(dpkg --print-architecture)
+          Architectures: ${!ARCH}
           Signed-By: /etc/apt/keyrings/docker.asc
-          EOF
+          DOCKERREPO
 
           apt-get update -y
 
@@ -187,5 +193,6 @@ Resources:
 
           # Levantar el stack si hay un docker-compose.yml en el repo
           docker compose up -d
+
             docker compose up -d 
             sudo apt-get install openjdk-17-jre -y
