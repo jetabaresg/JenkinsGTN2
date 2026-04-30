@@ -1,117 +1,159 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Plantilla de CloudFormation para desplegar OpenClaw en EC2 con Docker"
+
+Parameters:
+  KeyName:
+    Description: "Nombre del par de claves SSH existente en EC2"
+    Type: "AWS::EC2::KeyPair::KeyName"
+    Default: "openclaw"
+  InstanceType:
+    Description: "Tipo de instancia EC2"
+    Type: "String"
+    Default: "t3a.medium"
+    AllowedValues: ["t2.micro", "t2.small", "t3a.medium", "t3a.large"]
+  LatestAmiId:
+    Description: "AMI de Ubuntu 22.04 más reciente"
+    Type: "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>"
+    Default: "/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id"
+  VpcCidr:
+    Description: "CIDR para la VPC"
+    Type: "String"
+    Default: "10.0.0.0/16"
+  SubnetCidr:
+    Description: "CIDR para la subred pública"
+    Type: "String"
+    Default: "10.0.1.0/24"
+
 Resources:
-    VPC:
-      Type: AWS::EC2::VPC
-      Properties:
-        CidrBlock: 10.0.0.0/16
-        EnableDnsSupport: true
-        EnableDnsHostnames: true
-        Tags:
-        - Key: name
-          Value: vpc-trabajo
+  VPC:
+    Type: "AWS::EC2::VPC"
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: "Name"
+          Value: "vpc-openclaw"
 
-    InternetGateway:
-      Type: AWS::EC2::InternetGateway
+  InternetGateway:
+    Type: "AWS::EC2::InternetGateway"
+    Properties:
+      Tags:
+        - Key: "Name"
+          Value: "igw-openclaw"
 
-    AttachGateway:
-      Type: AWS::EC2::VPCGatewayAttachment
-      Properties:
-        VpcId: !Ref VPC
-        InternetGatewayId: !Ref InternetGateway
+  AttachGateway:
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
 
-    RouteTable:
-      Type: AWS::EC2::RouteTable
-      Properties:
-        VpcId: !Ref VPC
+  RouteTable:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: "Name"
+          Value: "rtb-openclaw"
 
-    Route:
-      Type: AWS::EC2::Route
-      DependsOn: AttachGateway
-      Properties:
-        RouteTableId: !Ref RouteTable
-        DestinationCidrBlock: 0.0.0.0/0
-        GatewayId: !Ref InternetGateway
+  Route:
+    Type: "AWS::EC2::Route"
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway
 
-    Subnet:
-      Type: AWS::EC2::Subnet
-      Properties:
-        VpcId: !Ref VPC
-        CidrBlock: 10.0.1.0/24
-        MapPublicIpOnLaunch: true
+  PublicSubnet:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref SubnetCidr
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: "Name"
+          Value: "subnet-openclaw"
 
-    SubnetRouteTableAssociation:
-      Type: AWS::EC2::SubnetRouteTableAssociation
-      Properties:
-        SubnetId: !Ref Subnet
-        RouteTableId: !Ref RouteTable
+  SubnetRouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref RouteTable
 
-    GrupoSeguridadOpenclaw:
-      Type: AWS::EC2::SecurityGroup
-      Properties:
-        GroupDescription: Grupo de Seguridad de OpenClaw
-        VpcId: !Ref VPC
-        SecurityGroupIngress:
-          - IpProtocol: tcp
-            FromPort: 22
-            ToPort: 22
-            CidrIp: 0.0.0.0/0
-          - IpProtocol: tcp
-            FromPort: 18987
-            ToPort: 18987
-            CidrIp: 0.0.0.0/0
+  OpenClawSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "Permitir SSH y puerto de OpenClaw"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: "tcp"
+          FromPort: 22
+          ToPort: 22
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: "tcp"
+          FromPort: 18987
+          ToPort: 18987
+          CidrIp: "0.0.0.0/0"
+      Tags:
+        - Key: "Name"
+          Value: "sg-openclaw"
 
-    instanciaOpenclaw:
-      Type: AWS::EC2::Instance
-      Properties:
-        ImageId: ami-091138d0f0d41ff90
-        InstanceType: t3a.medium
-        KeyName: openclaw
-        SubnetId: !Ref Subnet
-        SecurityGroupIds:
-          - !Ref GrupoSeguridadOpenclaw
-        Tags:
-          - Key: Name
-            Value: instanciaOpenclaw
+  OpenClawInstance:
+    Type: "AWS::EC2::Instance"
+    DependsOn: AttachGateway
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref OpenClawSecurityGroup
+      Tags:
+        - Key: "Name"
+          Value: "openclaw-instance"
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -e -x
+          exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
 
-        UserData:
-          Fn::Base64: !Sub |
-            #!/bin/bash
-            # Log de salida para depurar (puedes verlo en /var/log/user-data.log)
-            exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+          apt-get update -y
+          apt-get upgrade -y
+          apt-get install -y ca-certificates curl gnupg
 
-            apt-get update
-            apt-get upgrade -y
-            apt-get install -y ca-certificates curl gnupg
+          # Instalar Docker
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+          chmod a+r /etc/apt/keyrings/docker.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+          apt-get update -y
+          apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-            # Instalación de Docker (Método simplificado y más robusto para scripts)
-            install -m 0755 -d /etc/apt/keyrings
-            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-            chmod a+r /etc/apt/keyrings/docker.gpg
+          # Crear directorio para OpenClaw
+          mkdir -p /home/ubuntu/openclaw
+          cd /home/ubuntu/openclaw
 
-            echo \
-              "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-              $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-              tee /etc/apt/sources.list.d/docker.list > /dev/null
+          # Crear docker-compose.yml
+          cat <<EOF > docker-compose.yml
+          version: '3.8'
+          services:
+            openclaw:
+              image: ghcr.io/openclaw/openclaw:latest
+              container_name: openclaw
+              ports:
+                - "18987:18987"
+              restart: unless-stopped
+          EOF
 
-            apt-get update
-            apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          # Iniciar Docker y levantar el contenedor
+          systemctl enable docker
+          systemctl start docker
+          docker compose up -d
 
-            # Crear directorio de trabajo
-            mkdir -p /home/ubuntu/openclaw
-            cd /home/ubuntu/openclaw
-
-            # Crear el docker-compose.yml
-            cat <<EOF > docker-compose.yml
-            version: '3.8'
-            services:
-              web:
-                image: ghcr.io/openclaw/openclaw:latest
-                container_name: openclaw
-                ports:
-                  - '18987:18987'
-                restart: unless-stopped
-            EOF
-
-            # Iniciar Docker y levantar el servicio
-            sudo systemctl enable docker
-            sudo systemctl start docker
-            sudo docker compose up -d
+Outputs:
+  PublicIP:
+    Description: "IP pública de la instancia OpenClaw"
+    Value: !GetAtt OpenClawInstance.PublicIp
+  OpenClawURL:
+    Description: "URL para acceder a OpenClaw"
+    Value: !Sub "http://${OpenClawInstance.PublicIp}:18987"
